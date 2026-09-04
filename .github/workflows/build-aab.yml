@@ -37,7 +37,6 @@ jobs:
         env:
           AUTOBOT_WORKDIR: ${{ github.workspace }}/typebot-autobotpro
         run: |
-          # Run the script from the automation checkout; it pins v2.28.2 itself.
           chmod +x setup-autobot.sh
           ./setup-autobot.sh
 
@@ -75,7 +74,7 @@ jobs:
               controller = WebViewController()
                 ..setJavaScriptMode(JavaScriptMode.unrestricted)
                 ..setNavigationDelegate(NavigationDelegate())
-                ..loadRequest(Uri.parse(const String.fromEnvironment('AUTOBOT_WEB_URL')));
+                ..loadRequest(Uri.parse(String.fromEnvironment('AUTOBOT_WEB_URL')));
             }
             @override
             Widget build(BuildContext context) => MaterialApp(
@@ -85,14 +84,80 @@ jobs:
             );
           }
           EOF
-          # The URL is supplied at compile time so the wrapper does not need an embedded credential.
           sed -i "s|const String.fromEnvironment('AUTOBOT_WEB_URL')|String.fromEnvironment('AUTOBOT_WEB_URL', defaultValue: '$AUTOBOT_WEB_URL')|" lib/main.dart
 
-      - name: Build Android App Bundle
+      - name: Configure Android release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        working-directory: mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_BASE64" || { echo 'Missing GitHub Secret: KEYSTORE_BASE64'; exit 1; }
+          test -n "$KEYSTORE_PASSWORD" || { echo 'Missing GitHub Secret: KEYSTORE_PASSWORD'; exit 1; }
+          test -n "$KEY_ALIAS" || { echo 'Missing GitHub Secret: KEY_ALIAS'; exit 1; }
+          test -n "$KEY_PASSWORD" || { echo 'Missing GitHub Secret: KEY_PASSWORD'; exit 1; }
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/autobotpro-release.jks
+          test -s android/app/autobotpro-release.jks
+
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=autobotpro-release.jks
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/build.gradle.kts')
+          s = p.read_text()
+          if 'autobotpro-release.jks' not in s:
+              s = 'import java.util.Properties\nimport java.io.FileInputStream\n\n' + s
+              marker = 'android {'
+              if marker not in s:
+                  raise SystemExit('android block not found in generated Gradle file')
+              signing = '''android {
+                  val keystorePropertiesFile = rootProject.file("key.properties")
+                  val keystoreProperties = Properties()
+                  if (keystorePropertiesFile.exists()) {
+                      keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+                  }
+
+                  signingConfigs {
+                      create("release") {
+                          keyAlias = keystoreProperties["keyAlias"] as String?
+                          keyPassword = keystoreProperties["keyPassword"] as String?
+                          storeFile = keystoreProperties["storeFile"]?.let { file("$it") }
+                          storePassword = keystoreProperties["storePassword"] as String?
+                      }
+                  }
+          '''
+              s = s.replace(marker, signing, 1)
+              release_marker = 'buildTypes {'
+              if release_marker not in s:
+                  raise SystemExit('buildTypes block not found in generated Gradle file')
+              s = s.replace(release_marker, 'buildTypes {\n        getByName("release") {\n            signingConfig = signingConfigs.getByName("release")\n        }', 1)
+              p.write_text(s)
+          PY
+
+          grep -q 'signingConfigs' android/app/build.gradle.kts
+          grep -q 'signingConfig = signingConfigs.getByName("release")' android/app/build.gradle.kts
+
+      - name: Build signed Android App Bundle
         working-directory: mobile
         env:
           AUTOBOT_WEB_URL: ${{ vars.AUTOBOT_WEB_URL }}
         run: flutter build appbundle --release --dart-define=AUTOBOT_WEB_URL="$AUTOBOT_WEB_URL"
+
+      - name: Verify signed AAB exists
+        working-directory: mobile
+        run: |
+          test -s build/app/outputs/bundle/release/app-release.aab
+          ls -lh build/app/outputs/bundle/release/app-release.aab
 
       - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
@@ -101,3 +166,9 @@ jobs:
           path: mobile/build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 30
+
+      - name: Cleanup signing material
+        if: always()
+        working-directory: mobile
+        run: |
+          rm -f android/app/autobotpro-release.jks android/key.properties
