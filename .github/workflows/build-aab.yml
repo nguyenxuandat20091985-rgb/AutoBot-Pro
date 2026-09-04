@@ -1,0 +1,103 @@
+name: Build AutoBot Pro Android AAB
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: '3.35.2'
+  TYPEBOT_TAG: 'v2.28.2'
+
+jobs:
+  build-aab:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout automation repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Typebot v2.28.2
+        uses: actions/checkout@v4
+        with:
+          repository: baptisteArno/typebot.io
+          ref: v2.28.2
+          path: typebot-source
+          fetch-depth: 1
+
+      - name: Verify upstream tag and license
+        working-directory: typebot-source
+        run: |
+          test "$(git describe --tags --exact-match 2>/dev/null)" = "v2.28.2"
+          test -f LICENSE
+          grep -qi "GNU AFFERO GENERAL PUBLIC LICENSE" LICENSE
+
+      - name: Prepare white-label source
+        env:
+          AUTOBOT_WORKDIR: ${{ github.workspace }}/typebot-autobotpro
+        run: |
+          # Run the script from the automation checkout; it pins v2.28.2 itself.
+          chmod +x setup-autobot.sh
+          ./setup-autobot.sh
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Generate Android wrapper
+        env:
+          AUTOBOT_WEB_URL: ${{ vars.AUTOBOT_WEB_URL }}
+        run: |
+          test -n "$AUTOBOT_WEB_URL" || { echo 'Repository variable AUTOBOT_WEB_URL is required, e.g. https://admin.example.com'; exit 1; }
+          flutter create --org com.autobotpro --project-name autobot_pro mobile
+          cd mobile
+          flutter pub add webview_flutter
+          cat > lib/main.dart <<'EOF'
+          import 'package:flutter/material.dart';
+          import 'package:webview_flutter/webview_flutter.dart';
+
+          void main() => runApp(const AutoBotProApp());
+
+          class AutoBotProApp extends StatefulWidget {
+            const AutoBotProApp({super.key});
+            @override State<AutoBotProApp> createState() => _AutoBotProAppState();
+          }
+
+          class _AutoBotProAppState extends State<AutoBotProApp> {
+            late final WebViewController controller;
+            @override
+            void initState() {
+              super.initState();
+              controller = WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..setNavigationDelegate(NavigationDelegate())
+                ..loadRequest(Uri.parse(const String.fromEnvironment('AUTOBOT_WEB_URL')));
+            }
+            @override
+            Widget build(BuildContext context) => MaterialApp(
+              debugShowCheckedModeBanner: false,
+              title: 'AutoBot Pro',
+              home: Scaffold(body: SafeArea(child: WebViewWidget(controller: controller))),
+            );
+          }
+          EOF
+          # The URL is supplied at compile time so the wrapper does not need an embedded credential.
+          sed -i "s|const String.fromEnvironment('AUTOBOT_WEB_URL')|String.fromEnvironment('AUTOBOT_WEB_URL', defaultValue: '$AUTOBOT_WEB_URL')|" lib/main.dart
+
+      - name: Build Android App Bundle
+        working-directory: mobile
+        env:
+          AUTOBOT_WEB_URL: ${{ vars.AUTOBOT_WEB_URL }}
+        run: flutter build appbundle --release --dart-define=AUTOBOT_WEB_URL="$AUTOBOT_WEB_URL"
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobot-pro-aab
+          path: mobile/build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 30
