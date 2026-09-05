@@ -1,36 +1,37 @@
 # AutoBot Pro
 
-Automation layer for a white-label deployment based on Typebot `v2.28.2`.
+Vercel-native Next.js application for the AutoBot Pro control plane.
 
-## License
+## Architecture
 
-The pinned upstream `v2.28.2` source is verified by CI to contain the GNU Affero General Public License. This repository does **not** replace, remove, or rewrite the upstream LICENSE/copyright notices. Review the complete upstream license and notices before commercial distribution.
+- Next.js App Router for the web UI.
+- Vercel Node.js Serverless Functions for `/api/*` routes.
+- PostgreSQL via `DATABASE_URL` using the `postgres` driver.
+- Zod for API input validation.
+- No Docker or VPS is required for the Next.js application.
 
-## Repository contents
+## Vercel deployment
 
-- `setup-autobot.sh` — reproducible checkout/customization bootstrap.
-- `docker-compose.prod.yml` — PostgreSQL, Redis, MinIO, Builder, Viewer and Nginx.
-- `.env.example` — production configuration template.
-- `deploy.sh` — Ubuntu Docker bootstrap and deployment.
-- `nginx/autobotpro.conf` — reverse-proxy template.
-- `.github/workflows/build-aab.yml` — pinned-source Android wrapper build.
+Import `nguyenxuandat20091985-rgb/AutoBot-Pro` as a Next.js project and leave **Root Directory** empty. Vercel should detect `package.json` and run `npm run build`.
 
-## One-click VPS deployment
+Required environment variable:
 
-Use the script only after reviewing it and after preparing DNS for the builder/viewer hostnames:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/nguyenxuandat20091985-rgb/AutoBot-Pro/main/deploy.sh | sudo bash
+```text
+DATABASE_URL=postgresql://...
 ```
 
-The first run creates `/opt/autobotpro/.env` from `.env.example`. Edit that file with strong secrets and real domains before starting the production stack.
+Endpoints:
 
-## GitHub Actions Android build
+- `GET /api/health` — runtime/configuration health check.
+- `GET /api/bots` — list bot definitions.
+- `POST /api/bots` — create a bot definition.
 
-Create repository variable `AUTOBOT_WEB_URL`, for example `https://admin.example.com`. Every push to `main` runs the workflow. The result is an artifact named `autobot-pro-aab` containing `app-release.aab`.
+The API creates the small control-plane schema lazily on first database access. For production, use managed PostgreSQL and keep credentials in Vercel Environment Variables.
 
-For Google Play production signing, configure a protected Android keystore and signing secrets before publishing. The default workflow deliberately does not embed a private signing key in Git.
+## Important scope note
 
-## Important production notes
+The previous repository contained infrastructure scripts that clone Typebot v2.28.2 and run Docker services. Shell/Docker operations cannot execute inside Vercel Serverless Functions. This repository now contains a Vercel-native control-plane implementation of the bot configuration logic; it is **not** a byte-for-byte port of the complete Typebot Builder/Viewer runtime.
 
-The Docker images in `docker-compose.prod.yml` point at the upstream Typebot 2.28.2 images. A true white-label production image must be built from the customized source and published to a registry you control; change the image references before treating the stack as the final commercial deployment.
+Full Typebot functionality requires porting each upstream application subsystem or running its supported server architecture separately. The existing Docker scripts are retained as an infrastructure option and are not used by the Next.js deployment.
+
+Any redistribution of upstream Typebot-derived source must preserve its applicable AGPLv3 license and copyright notices.
