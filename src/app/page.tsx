@@ -1,24 +1,7 @@
-export default function Home() {
-  return (
-    <main>
-      <header>
-        <div className="brand">AutoBot Pro</div>
-        <div className="badge">Vercel Serverless</div>
-      </header>
-      <section className="grid">
-        <article className="card">
-          <h2>Quản lý bot</h2>
-          <p className="muted">Tạo và quản lý cấu hình bot qua API serverless tại <code>/api/bots</code>.</p>
-        </article>
-        <article className="card">
-          <h2>Trạng thái hệ thống</h2>
-          <p className="muted">Kiểm tra runtime và cấu hình database tại <code>/api/health</code>.</p>
-        </article>
-        <article className="card">
-          <h2>Triển khai</h2>
-          <p className="muted">Ứng dụng không cần Docker hoặc VPS; Vercel tự build và chạy các API route.</p>
-        </article>
-      </section>
-    </main>
-  );
-}
+"use client";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+type Bot={id:string;name:string;description?:string;enabled:boolean;config?:Record<string,unknown>;created_at?:string};
+export default function Home(){const[bots,setBots]=useState<Bot[]>([]);const[loading,setLoading]=useState(true);const[saving,setSaving]=useState(false);const[message,setMessage]=useState("");const[form,setForm]=useState({name:"",token:"",type:"Telegram",enabled:true});
+async function loadBots(){setLoading(true);try{const r=await fetch("/api/bots",{cache:"no-store"});const d=await r.json();setBots(d.bots??[])}catch{setMessage("Không thể kết nối API bot.")}finally{setLoading(false)}}useEffect(()=>{loadBots()},[]);const online=useMemo(()=>bots.filter(b=>b.enabled).length,[bots]);
+async function addBot(e:FormEvent){e.preventDefault();setSaving(true);setMessage("");try{const r=await fetch("/api/bots",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:form.name,description:`${form.type} • ${form.token?"Đã cấu hình token":"Chưa có token"}`,enabled:form.enabled,config:{type:form.type,token:form.token}})});if(!r.ok)throw new Error();setForm({name:"",token:"",type:"Telegram",enabled:true});setMessage("Đã thêm bot thành công.");await loadBots()}catch{setMessage("Thêm bot thất bại. Kiểm tra DATABASE_URL và API.")}finally{setSaving(false)}}
+return <div className="dashboard"><aside className="sidebar"><div className="logo"><span>✦</span> AutoBot Pro</div><nav><a className="active">Tổng quan</a><a>Bot của tôi</a><a>Hoạt động</a><a>Cài đặt</a></nav><div className="sideFoot">Vercel Serverless<br/><small>Dashboard v2.0</small></div></aside><main className="content"><header className="topbar"><div><p className="eyebrow">TRUNG TÂM ĐIỀU KHIỂN</p><h1>Xin chào, Admin 👋</h1><p className="subtitle">Quản lý và theo dõi hệ thống bot của bạn.</p></div><div className="status"><i/> Hệ thống hoạt động</div></header><section className="stats"><div className="stat"><span>TỔNG SỐ BOT</span><strong>{bots.length}</strong><b>↗ Sẵn sàng quản lý</b></div><div className="stat"><span>ĐANG HOẠT ĐỘNG</span><strong>{online}</strong><b>● Online</b></div><div className="stat"><span>NGOẠI TUYẾN</span><strong>{bots.length-online}</strong><em>● Offline</em></div><div className="stat"><span>API STATUS</span><strong className="ok">OK</strong><b>● Serverless</b></div></section><section className="layout"><div className="panel"><div className="panelHead"><div><h2>Bot của bạn</h2><p>{loading?"Đang tải dữ liệu...":`${bots.length} cấu hình`}</p></div><button className="primary" onClick={()=>document.getElementById("add-bot")?.scrollIntoView({behavior:"smooth"})}>＋ Thêm bot</button></div><div className="tableWrap"><table><thead><tr><th>TÊN BOT</th><th>LOẠI</th><th>TRẠNG THÁI</th><th>CẬP NHẬT</th><th>THAO TÁC</th></tr></thead><tbody>{bots.map(b=><tr key={b.id}><td><strong>{b.name}</strong><small>{b.description||"Không có mô tả"}</small></td><td><span className="type">{String(b.config?.type||"Bot")}</span></td><td><span className={b.enabled?"pill on":"pill off"}>{b.enabled?"● Online":"● Offline"}</span></td><td>{b.created_at?new Date(b.created_at).toLocaleDateString("vi-VN"):"—"}</td><td><button className="ghost">Sửa</button><button className="danger">Xóa</button></td></tr>)}{!loading&&bots.length===0&&<tr><td colSpan={5} className="empty">Chưa có bot. Hãy tạo bot đầu tiên.</td></tr>}</tbody></table></div></div><form id="add-bot" className="panel formPanel" onSubmit={addBot}><div className="panelHead"><div><h2>Thêm bot mới</h2><p>Cấu hình bot trong vài giây</p></div></div><label>Tên bot<input required value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Ví dụ: CSKH AutoBot"/></label><label>Token<input type="password" value={form.token} onChange={e=>setForm({...form,token:e.target.value})} placeholder="Nhập token bot"/></label><label>Loại bot<select value={form.type} onChange={e=>setForm({...form,type:e.target.value})}><option>Telegram</option><option>Webhook</option><option>Facebook</option><option>Zalo</option><option>Khác</option></select></label><label className="switchRow"><span>Kích hoạt ngay</span><input type="checkbox" checked={form.enabled} onChange={e=>setForm({...form,enabled:e.target.checked})}/></label><button className="primary full" disabled={saving}>{saving?"Đang lưu...":"Tạo bot →"}</button>{message&&<p className="message">{message}</p>}</form></section><section className="panel activity"><div className="panelHead"><div><h2>Hoạt động gần đây</h2><p>Nhật ký hệ thống</p></div><span className="live">● LIVE</span></div><div className="log"><span className="dot green"/><div><strong>Dashboard sẵn sàng</strong><p>AutoBot Pro đã kết nối Vercel Serverless</p></div><time>Vừa xong</time></div><div className="log"><span className="dot blue"/><div><strong>API Bot</strong><p>Endpoint /api/bots sẵn sàng</p></div><time>Hệ thống</time></div></section></main></div>}
